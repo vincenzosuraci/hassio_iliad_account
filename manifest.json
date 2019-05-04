@@ -4,5 +4,5 @@
   "documentation": "https://github.com/vincenzosuraci/hassio_iliad_account",
   "dependencies": [],
   "codeowners": ["@vincenzosuraci"],
-  "requirements": []
+  "requirements": ['beautifulsoup4']
 }
