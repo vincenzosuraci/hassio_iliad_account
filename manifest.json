@@ -1,0 +1,8 @@
+{
+  "domain": "iliad_account",
+  "name": "Iliad",
+  "documentation": "https://github.com/vincenzosuraci/hassio_iliad_account",
+  "dependencies": [],
+  "codeowners": ["@vincenzosuraci"],
+  "requirements": []
+}
