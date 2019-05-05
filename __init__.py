@@ -1,6 +1,6 @@
+import datetime
 from datetime import timedelta
 import logging
-from os import replace
 
 import requests
 import voluptuous as vol
@@ -72,15 +72,15 @@ class IliadPlatform:
         self.update_status_interval = config[DOMAIN][CONF_SCAN_INTERVAL]
 
         self._credit = {
-            'voice_seconds': 0,
-            'voice_seconds_max': None,
-            'sms': 0,
-            'sms_max': None,
-            'mms': 0,
-            'mms_max': None,
-            'data_GB': 0,
-            'data_GB_max': None,
-            'renew': None
+            'voice': {'value': 0, 'icon': 'mdi:phone', 'uom': 's'},
+            'voice_max': {'value': None, 'icon': 'mdi:phone', 'uom': 's'},
+            'sms': {'value': 0, 'icon': 'mdi:message-text', 'uom': 'SMS'},
+            'sms_max': {'value': None, 'icon': 'mdi:message-text', 'uom': 'SMS'},
+            'mms': {'value': 0, 'icon': 'mdi:message-image', 'uom': 'MMS'},
+            'mms_max': {'value': None, 'icon': 'mdi:message-image', 'uom': 'MMS'},
+            'data': {'value': 0, 'icon': 'mdi:web', 'uom': 'GB'},
+            'data_max': {'value': None, 'icon': 'mdi:web', 'uom': 'GB'},
+            'renewal': {'value': None, 'icon': 'mdi:clock-outline', 'uom': ''},
         }
 
         # login and fetch data
@@ -99,12 +99,34 @@ class IliadPlatform:
 
         return True
 
-    def _get_max(self, elem):
+    @staticmethod
+    def _get_max(elem):
         for content in elem.contents:
             content = str(content).strip()
             if content[:1] == '/':
                 return content[1:].strip()
         return None
+
+    @staticmethod
+    def _get_renewal_datetime_from_str(renewal_str):
+        index = renewal_str.find(':')
+        _LOGGER.debug('looking for ":", index: ' + str(index))
+        if index >= 0:
+            H = int(renewal_str[index-2:index])
+            i = int(renewal_str[index+1:index+3])
+            _LOGGER.debug('time: ' + str(H) + ':' + str(i))
+            index = renewal_str.find('/')
+            _LOGGER.debug('looking for "/", index: ' + str(index))
+            if index >= 0:
+                d = int(renewal_str[index-2:index])
+                m = int(renewal_str[index+1:index+3])
+                Y = int(renewal_str[index+4:index+8])
+                _LOGGER.debug('date: ' + str(d) + '/' + str(m) + '/' + str(Y))
+                dt = datetime.datetime.combine(datetime.date(Y, m, d), datetime.time(H, i))
+                _LOGGER.info('renewal datetime: ' + str(dt))
+                return dt
+
+        return renewal_str
 
     async def async_update_credits(self, now=None):
         # login url
@@ -117,7 +139,9 @@ class IliadPlatform:
         http_status_code = response.status_code
         # check response is okay
         if http_status_code != 200:
+
             _LOGGER.error('login page (' + url + ') error: ' + str(http_status_code))
+
         else:
             # get html in bytes
             content = response.content
@@ -126,7 +150,9 @@ class IliadPlatform:
             # end offerta
             divs = soup.findAll("div", {"class": "end_offerta"})
             if len(divs) == 1:
-                self._credit['renew'] = divs[0].text.strip()
+                renewal_str = divs[0].text.strip()
+                renewal_datetime = IliadPlatform._get_renewal_datetime_from_str(renewal_str)
+                self._credit['renewal']['value'] = renewal_datetime
             # find div tags having class conso__text
             divs = soup.findAll("div", {"class": "conso__text"})
             for div in divs:
@@ -136,35 +162,37 @@ class IliadPlatform:
                     text = span.text
                     if text[-1:] == 's':
                         # voice seconds
-                        self._credit['voice_seconds'] = int(text[:-1])
-                        max = self._get_max(div)
+                        self._credit['voice']['value'] = int(text[:-1])
+                        max = IliadPlatform._get_max(div)
                         if max is not None:
-                            self._credit['voice_seconds_max'] = int(max[:-1])
+                            self._credit['voice_max']['value'] = int(max[:-1])
                     elif text[-2:] == 'GB':
                         # GB of data
                         GB = text[:-2].replace(',', '.')
-                        self._credit['data_GB'] = float(GB)
-                        max = self._get_max(div)
+                        self._credit['data']['value'] = float(GB)
+                        max = IliadPlatform._get_max(div)
                         if max is not None:
-                            self._credit['data_GB_max'] = float(max[:-2].replace(',', '.'))
+                            self._credit['data_max']['value'] = float(max[:-2].replace(',', '.'))
                     elif text[-3:] == 'SMS':
                         # sms
-                        self._credit['sms'] = int(text[:-3].strip())
-                        max = self._get_max(div)
+                        self._credit['sms']['value'] = int(text[:-3].strip())
+                        max = IliadPlatform._get_max(div)
                         if max is not None:
-                            self._credit['sms_max'] = int(max[:-3].strip())
+                            self._credit['sms_max']['value'] = int(max[:-3].strip())
                     elif text[-3:] == 'MMS':
                         # sms
-                        self._credit['mms'] = int(text[:-3].strip())
-                        max = self._get_max(div)
+                        self._credit['mms']['value'] = int(text[:-3].strip())
+                        max = IliadPlatform._get_max(div)
                         if max is not None:
-                            self._credit['mms_max'] = int(max[:-3].strip())
+                            self._credit['mms_max']['value'] = int(max[:-3].strip())
 
             #_LOGGER.info(self._credit)
 
             for k, v in self._credit.items():
-                self._hass.states.async_set(DOMAIN + "." + OBJECT_ID_CREDIT + "_" + k, v)
-
+                if v['value'] is not None:
+                    attributes = {"icon": v['icon'], 'unit_of_measurement': v['uom']}
+                    self._hass.states.async_set(DOMAIN + "." + OBJECT_ID_CREDIT + "_" + k, v['value'], attributes)
             return True
+
         return False
 
