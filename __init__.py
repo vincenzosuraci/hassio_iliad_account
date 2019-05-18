@@ -129,12 +129,23 @@ class IliadPlatform:
         return renewal_str
 
     async def async_update_credits(self, now=None):
+
+        # Session keeping coockies
+        session = requests.Session()
+
+        _LOGGER.debug('Updating Iliad account credit...')
+
         # login url
         url = 'https://www.iliad.it/account/'
+
+        # enable coockie
+        session.post(url)
+
         # set POST https params
         params = {'login-ident': self._username, 'login-pwd': self._password}
+
         # get response to POST request
-        response = requests.post(url, params)
+        response = session.post(url, params=params)
         # get http status code
         http_status_code = response.status_code
         # check response is okay
@@ -145,19 +156,27 @@ class IliadPlatform:
         else:
             # get html in bytes
             content = response.content
+            _LOGGER.debug(response.text)
             # generate soup object
             soup = BeautifulSoup(content, 'html.parser')
             # end offerta
-            divs = soup.findAll("div", {"class": "end_offerta"})
+            div_class = "end_offerta"
+            divs = soup.findAll("div", {"class": div_class})
+            _LOGGER.debug('Found ' + str(len(divs)) + ' divs having class ' + div_class)
             if len(divs) == 1:
                 renewal_str = divs[0].text.strip()
                 renewal_datetime = IliadPlatform._get_renewal_datetime_from_str(renewal_str)
                 self._credit['renewal']['value'] = renewal_datetime
+                _LOGGER.info('Iliad account renewal: '+str(renewal_datetime))
             # find div tags having class conso__text
-            divs = soup.findAll("div", {"class": "conso__text"})
+            div_class = "conso__text"
+            divs = soup.findAll("div", {"class": div_class})
+            _LOGGER.debug('Found '+str(len(divs))+' divs having class '+div_class)
             for div in divs:
                 # find span tags having class red
-                spans = div.findAll("span", {"class": "red"})
+                span_class = "red"
+                spans = div.findAll("span", {"class": span_class})
+                _LOGGER.debug('Found ' + str(len(spans)) + ' spans having class ' + span_class)
                 for span in spans:
                     text = span.text
                     if text[-1:] == 's':
@@ -186,10 +205,9 @@ class IliadPlatform:
                         if max is not None:
                             self._credit['mms_max']['value'] = int(max[:-3].strip())
 
-            #_LOGGER.info(self._credit)
-
             for k, v in self._credit.items():
                 if v['value'] is not None:
+                    _LOGGER.info(k+': '+str(v['value']))
                     attributes = {"icon": v['icon'], 'unit_of_measurement': v['uom']}
                     self._hass.states.async_set(DOMAIN + "." + OBJECT_ID_CREDIT + "_" + k, v['value'], attributes)
             return True
